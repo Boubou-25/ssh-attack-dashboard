@@ -55,7 +55,7 @@ Dashboard de visualisation et analyse d'attaques SSH en temps réel avec géoloc
 
 ## 🚀 Installation
 
-git clone https://github.com/TON-USERNAME/ssh-attack-dashboard.git
+git clone https://github.com/Boubou-25/ssh-attack-dashboard.git
 cd ssh-attack-dashboard
 pip install -r requirements.txt
 python run.py
