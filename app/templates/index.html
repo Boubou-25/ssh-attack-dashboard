@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH Attack Dashboard</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- CSS custom -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=3">
+
+</head>
+<body>
+    <!-- Navbar -->
+    <!-- Navbar -->
+<nav class="navbar navbar-dark">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">
+            <i class="fas fa-shield-virus"></i> SSH Attack Dashboard
+        </span>
+        <div class="d-flex align-items-center">
+            <span class="text-light me-3">
+<i class="fas fa-circle text-success pulse"></i> Live
+</span>
+
+<!-- NOUVEAU : Bouton Auto-ban -->
+<button class="btn btn-danger btn-sm me-3" onclick="openBanModal()" title="Bannir les IPs critiques">
+    <i class="fas fa-ban"></i> Auto-ban
+    <span class="badge bg-light text-dark ms-1" id="ban-count">0</span>
+</button>
+
+            
+            <!-- NOUVEAU : Badge notifications -->
+            <div class="notification-wrapper me-3">
+                <button class="notification-btn" id="notification-btn" onclick="toggleNotifications()">
+                    <i class="fas fa-bell"></i>
+                    <span class="notification-badge" id="notification-badge" style="display: none;">0</span>
+                </button>
+                
+                <!-- Dropdown historique -->
+                <div class="notification-dropdown" id="notification-dropdown" style="display: none;">
+                    <div class="notification-header">
+                        <h6>Notifications</h6>
+                        <div class="notification-actions">
+                            <button class="btn-icon" onclick="toggleSound()" title="Activer/Désactiver le son">
+                                <i class="fas fa-volume-up" id="sound-icon"></i>
+                            </button>
+                            <button class="btn-icon" onclick="clearAllNotifications()" title="Tout marquer comme lu">
+                                <i class="fas fa-check-double"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="notification-list" id="notification-list">
+                        <p class="text-muted text-center py-3">Aucune notification</p>
+                    </div>
+                </div>
+            </div>
+            
+            <span class="theme-toggle text-light" onclick="toggleTheme()">
+                <i class="fas fa-moon" id="theme-icon"></i>
+            </span>
+        </div>
+    </div>
+</nav>
+
+
+    <div class="container-fluid mt-4">
+        <!-- Cartes statistiques avec sparklines -->
+        <div class="row mb-4">
+            <!-- Carte 1 : Total Tentatives -->
+            <div class="col-md-4">
+                <div class="card stat-card position-relative">
+                    <i class="fas fa-exclamation-triangle icon text-danger"></i>
+                    <div class="card-body">
+                        <h5 class="card-title text-danger">
+                            <i class="fas fa-bug"></i> Total Tentatives
+                        </h5>
+                        <h2 id="total-attempts">0</h2>
+                        <p class="card-text text-muted">Échecs de connexion détectés</p>
+                        
+                        <!-- Mini graphique sparkline -->
+                        <svg class="sparkline" width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none">
+                            <polyline fill="none" stroke="#dc3545" stroke-width="2" 
+                                      points="0,30 25,25 50,28 75,20 100,15 125,18 150,10 175,8 200,5">
+                            </polyline>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Carte 2 : IPs Uniques -->
+            <div class="col-md-4">
+                <div class="card stat-card position-relative">
+                    <i class="fas fa-network-wired icon text-warning"></i>
+                    <div class="card-body">
+                        <h5 class="card-title text-warning">
+                            <i class="fas fa-globe"></i> IPs Uniques
+                        </h5>
+                        <h2 id="unique-ips">0</h2>
+                        <p class="card-text text-muted">Adresses malveillantes</p>
+                        
+                        <!-- Mini graphique sparkline -->
+                        <svg class="sparkline" width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none">
+                            <polyline fill="none" stroke="#ffc107" stroke-width="2" 
+                                      points="0,35 25,30 50,32 75,28 100,25 125,20 150,18 175,15 200,12">
+                            </polyline>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Carte 3 : Dernière MAJ -->
+            <div class="col-md-4">
+                <div class="card stat-card position-relative">
+                    <i class="fas fa-sync-alt icon text-info"></i>
+                    <div class="card-body">
+                        <h5 class="card-title text-info">
+                            <i class="fas fa-clock"></i> Dernière MAJ
+                        </h5>
+                        <h2 id="last-update" style="font-size: 2.5rem;">--:--</h2>
+                        <p class="card-text text-muted">Rafraîchissement auto 10s</p>
+                        
+                        <!-- Mini graphique sparkline (ligne droite pour "temps") -->
+                        <svg class="sparkline" width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none">
+                            <polyline fill="none" stroke="#0dcaf0" stroke-width="2" 
+                                      points="0,20 50,20 100,20 150,20 200,20">
+                            </polyline>
+                            <circle cx="200" cy="20" r="4" fill="#0dcaf0" class="pulse-dot"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STATISTIQUES AVANCÉES -->
+<div class="row mb-4">
+    <!-- Score de sécurité -->
+    <div class="col-md-3">
+        <div class="stat-card text-center">
+            <div class="card-title">Score de sécurité</div>
+            <div class="security-score-wrapper">
+                <svg viewBox="0 0 100 100" class="security-score-svg">
+                    <circle cx="50" cy="50" r="45" class="score-bg"></circle>
+                    <circle cx="50" cy="50" r="45" class="score-progress" id="score-circle"></circle>
+                </svg>
+                <div class="score-value" id="security-score">0</div>
+            </div>
+            <div class="score-label" id="score-label">Calcul en cours...</div>
+        </div>
+    </div>
+
+    <!-- Répartition par niveau -->
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="card-title">Répartition</div>
+            <canvas id="levelChart" style="max-height: 180px;"></canvas>
+        </div>
+    </div>
+
+    <!-- Pic d'attaque -->
+    <div class="col-md-3">
+        <div class="stat-card text-center">
+            <div class="card-title">Pic d'attaque</div>
+            <div class="peak-hour" id="peak-hour">--h</div>
+            <div class="peak-attempts" id="peak-attempts">0 tentatives</div>
+            <span class="badge badge-info-custom mt-2">Heure de pointe</span>
+        </div>
+    </div>
+
+    <!-- Tendance -->
+    <div class="col-md-3">
+        <div class="stat-card text-center">
+            <div class="card-title">Tendance 24h</div>
+            <div class="trend-value" id="trend-value">
+                <i class="fas fa-minus"></i> 0%
+            </div>
+            <div class="trend-label" id="trend-label">vs hier</div>
+        </div>
+    </div>
+</div>
+
+
+        <!-- Graphique Chart.js (barres) -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card dashboard-card">
+                    <div class="card-header">
+    <i class="fas fa-chart-line"></i> Top 10 IPs Suspectes
+</div>
+                    <div class="card-body">
+                        <canvas id="attackChart" height="80"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Timeline des dernières attaques -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card dashboard-card">
+                    <div class="card-header text-white" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                        <i class="fas fa-history"></i> Dernières Attaques Détectées
+                        <span class="badge bg-light text-dark ms-2" id="timeline-count">0</span>
+                    </div>
+                    <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                        <div class="timeline" id="attack-timeline">
+                            <!-- Timeline items seront ajoutés par JS -->
+                            <div class="timeline-item skeleton-timeline">
+                                <div class="skeleton skeleton-text"></div>
+                            </div>
+                            <div class="timeline-item skeleton-timeline">
+                                <div class="skeleton skeleton-text"></div>
+                            </div>
+                            <div class="timeline-item skeleton-timeline">
+                                <div class="skeleton skeleton-text"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Graphique Timeline 24h -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card dashboard-card">
+                    <div class="card-header text-white" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                        <i class="fas fa-chart-area"></i> Évolution des Attaques (24 dernières heures)
+                    </div>
+                    <div class="card-body">
+                        <canvas id="timelineChart" height="60"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top 5 Pays Attaquants -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card dashboard-card">
+                    <div class="card-header text-white" style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);">
+                        <i class="fas fa-globe-americas"></i> Top 5 Pays Attaquants
+                    </div>
+                    <div class="card-body">
+                        <div id="top-countries">
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                <p class="mt-2">Chargement des données géographiques...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tableau des IPs -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card dashboard-card">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between">
+                        <span>
+                            <i class="fas fa-list"></i> Détail des IPs Malveillantes
+                        </span>
+                        <div>
+                            <button class="btn btn-sm btn-success" onclick="exportJSON()">
+                                <i class="fas fa-download"></i> JSON
+                            </button>
+                            <button class="btn btn-sm btn-info" onclick="exportCSV()">
+                                <i class="fas fa-file-csv"></i> CSV
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Barre de recherche et filtres -->
+                        <div class="search-filters mb-4">
+                            <div class="row g-3">
+                                <!-- Recherche par IP -->
+                                <div class="col-md-3">
+                                    <div class="search-input-wrapper">
+                                        <i class="fas fa-search search-icon"></i>
+                                        <input 
+                                            type="text" 
+                                            class="form-control search-input" 
+                                            id="search-ip" 
+                                            placeholder="Rechercher une IP..."
+                                            autocomplete="off"
+                                        >
+                                        <button class="clear-search" id="clear-search" style="display: none;">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Filtre par pays -->
+                                <div class="col-md-2">
+                                    <select class="form-select filter-select" id="filter-country">
+                                        <option value="all">Tous pays</option>
+                                        <!-- Options ajoutées dynamiquement -->
+                                    </select>
+                                </div>
+                                
+                                <!-- Filtre par niveau -->
+                                <div class="col-md-2">
+                                    <select class="form-select filter-select" id="filter-level">
+                                        <option value="all">Tous niveaux</option>
+                                        <option value="critique">🔴 Critique</option>
+                                        <option value="eleve">🟡 Élevé</option>
+                                        <option value="modere">🔵 Modéré</option>
+                                    </select>
+                                </div>
+                                
+                                <!-- Filtre par tentatives -->
+                                <div class="col-md-3">
+                                    <select class="form-select filter-select" id="filter-attempts">
+                                        <option value="all">Toutes tentatives</option>
+                                        <option value="50">≥ 50 tentatives</option>
+                                        <option value="20">≥ 20 tentatives</option>
+                                        <option value="10">≥ 10 tentatives</option>
+                                    </select>
+                                </div>
+                                
+                                <!-- Bouton reset -->
+                                <div class="col-md-2">
+                                    <button class="btn btn-outline-secondary w-100" id="reset-filters">
+                                        <i class="fas fa-redo-alt"></i> Reset
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Compteur de résultats -->
+                            <div class="results-count mt-3">
+                                <span id="results-count">
+                                    <i class="fas fa-filter"></i> 
+                                    <strong id="filtered-count">0</strong> résultat(s) sur <strong id="total-count">0</strong>
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <!-- Tableau -->
+                        <table class="table table-striped table-hover" id="ip-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Adresse IP</th>
+                                    <th>Pays</th>
+                                    <th>Tentatives</th>
+                                    <th>Niveau</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ip-tbody">
+                                <!-- Skeleton loading -->
+                                <tr class="skeleton-row">
+                                    <td colspan="6">
+                                        <div class="skeleton-table-row">
+                                            <div class="skeleton skeleton-table-cell"></div>
+                                            <div class="skeleton skeleton-table-cell"></div>
+                                            <div class="skeleton skeleton-table-cell"></div>
+                                            <div class="skeleton skeleton-table-cell"></div>
+                                            <div class="skeleton skeleton-table-cell"></div>
+                                            <div class="skeleton skeleton-table-cell"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+   <!-- Container pour les toasts (position fixe en haut à droite) -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    
+    <!-- CountUp.js pour compteurs animés -->
+    <script src="https://cdn.jsdelivr.net/npm/countup.js@2.8.0/dist/countUp.umd.min.js"></script>
+    
+    <!-- JavaScript custom -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    
+    <!-- Modal Auto-ban -->
+<div class="modal fade" id="banModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+                <h5 class="modal-title" style="color: var(--text-primary);">
+                    <i class="fas fa-ban text-danger"></i> Auto-bannissement IPs critiques
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Liste des IPs -->
+                <div class="alert alert-warning" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>Attention :</strong> Cette action va bloquer <span id="ban-modal-count">0</span> IP(s) avec iptables.
+                </div>
+                
+                <h6 style="color: var(--text-primary); margin-bottom: 12px;">IPs qui seront bannies (≥50 tentatives) :</h6>
+                <div id="ban-ip-list" class="mb-3" style="max-height: 200px; overflow-y: auto;">
+                    <!-- Rempli dynamiquement -->
+                </div>
+                
+                <h6 style="color: var(--text-primary); margin-bottom: 12px;">Script bash généré :</h6>
+                <pre id="ban-script-preview" style="background: var(--bg-tertiary); padding: 16px; border-radius: 8px; font-size: 12px; color: var(--text-primary); max-height: 300px; overflow-y: auto;">
+# Chargement...
+                </pre>
+                
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="ban-confirm-check">
+                    <label class="form-check-label" for="ban-confirm-check" style="color: var(--text-primary);">
+                        Je comprends que ces IPs seront bloquées définitivement
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-danger" id="download-ban-script" onclick="downloadBanScript()" disabled>
+                    <i class="fas fa-download"></i> Télécharger le script
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
+</body>
+</html>
