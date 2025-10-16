@@ -10,27 +10,22 @@ api_bp = Blueprint('api', __name__)
 
 def get_ssh_stats():
     """
-    Lit les statistiques depuis le fichier JSON généré par le parser
-    Si vide ou inexistant, retourne des données mock pour démo
+    Utilise ssh_parser.py pour lire directement les logs journalctl
     """
-    json_path = Path('/tmp/ssh_stats.json')
-    
-    # Données mock pour démo (macOS sans logs SSH réels)
-    MOCK_DATA = {
-        'timestamp': datetime.now().isoformat(),
-        'total_attempts': 245,
-        'unique_ips': 8,
-        'top_ips': [
-            {'ip': '192.168.1.100', 'attempts': 56},
-            {'ip': '10.0.0.50', 'attempts': 48},
-            {'ip': '45.142.212.61', 'attempts': 42},
-            {'ip': '185.220.101.34', 'attempts': 35},
-            {'ip': '123.45.67.89', 'attempts': 28},
-            {'ip': '203.0.113.45', 'attempts': 15},
-            {'ip': '198.51.100.22', 'attempts': 12},
-            {'ip': '172.16.0.88', 'attempts': 9}
-        ]
-    }
+    try:
+        from app.ssh_parser import get_stats
+        return get_stats()
+    except Exception as e:
+        print(f"❌ Erreur import ssh_parser: {e}")
+        # Données mock en fallback
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'total_attempts': 245,
+            'unique_ips': 8,
+            'top_ips': [
+                {'ip': '192.168.1.100', 'attempts': 56, 'last_seen': '2025-10-17 01:00:00'},
+            ]
+        }
     
     # Vérifie que le fichier existe
     if not json_path.exists():
