@@ -1,279 +1,248 @@
-from flask import Blueprint, jsonify, render_template
-import json
-from pathlib import Path
-from datetime import datetime, timedelta
-import requests
+"""
+SSH Attack Dashboard - API Routes
+Compatible avec le frontend JS existant (1500 lignes)
+"""
 
+from flask import Blueprint, jsonify, request
+from datetime import datetime
+from ..database import (
+    init_db,
+    get_dashboard_stats,
+    get_all_attacks,
+    get_top_countries,
+    get_top_ips,
+    get_critical_ips_for_ban,
+    get_attacks_timeline,
+    mark_ip_as_banned,
+    get_attack_by_ip,
+    get_db_size
+)
+from ..ssh_parser import parse_and_store_ssh_logs
 
-api_bp = Blueprint('api', __name__)
+api = Blueprint('api', __name__)
 
+# Initialise BDD au démarrage
+init_db()
 
-def get_ssh_stats():
+# ============================================
+# ENDPOINT PRINCIPAL (COMPATIBLE JS)
+# ============================================
+
+@api.route('/api/stats', methods=['GET'])
+def get_stats():
     """
-    Utilise ssh_parser.py pour lire directement les logs journalctl
+    Endpoint principal appelé par le JS frontend.
+    Retourne TOUTES les données nécessaires au dashboard.
     """
-    try:
-        from app.ssh_parser import get_stats
-        return get_stats()
-    except Exception as e:
-        print(f"❌ Erreur import ssh_parser: {e}")
-        # Données mock en fallback
-        return {
-            'timestamp': datetime.now().isoformat(),
-            'total_attempts': 245,
-            'unique_ips': 8,
-            'top_ips': [
-                {'ip': '192.168.1.100', 'attempts': 56, 'last_seen': '2025-10-17 01:00:00'},
-            ]
-        }
+    # Parse nouveaux logs SSH + stocke en BDD
+    parse_and_store_ssh_logs()
     
-    # Vérifie que le fichier existe
-    if not json_path.exists():
-        print("[INFO] JSON non trouvé, données mock utilisées")
-        return MOCK_DATA
+    # Récupère stats depuis BDD
+    stats = get_dashboard_stats()
+    top_ips_data = get_top_ips(limit=10)
+    top_countries_data = get_top_countries(limit=5)
     
-    try:
-        # Lit le fichier JSON
-        with open(json_path, 'r') as f:
-            data = json.load(f)
-        
-        # Si aucune tentative détectée, utilise les données mock
-        if data.get('total_attempts', 0) == 0:
-            print("[INFO] Aucune donnée réelle, données mock utilisées")
-            return MOCK_DATA
-        
-        # Vérifie que les données ne sont pas trop anciennes (>5 min)
-        if 'timestamp' in data:
-            try:
-                timestamp = datetime.fromisoformat(data['timestamp'])
-                age = datetime.now() - timestamp
-                
-                if age > timedelta(minutes=5):
-                    print(f"[WARN] Données JSON anciennes ({age.seconds}s)")
-            except:
-                pass
-        
-        print(f"[INFO] {data['total_attempts']} tentatives détectées")
-        return data
-        
-    except Exception as e:
-        print(f"[ERROR] Impossible de lire le JSON: {e}")
-        return MOCK_DATA
-
-
-def get_flag_emoji(country_code):
-    """
-    Convertit un code pays (ex: FR) en emoji drapeau (ex: 🇫🇷)
-    Utilise les Regional Indicator Symbols Unicode
-    """
-    if not country_code or len(country_code) != 2:
-        return '🏴'  # Drapeau noir par défaut
+    # Calcul peak attack (heure avec le plus d'attaques)
+    timeline = get_attacks_timeline(hours=24)
+    peak_hour = '--h'
+    peak_attempts = 0
+    if timeline:
+        peak_data = max(timeline, key=lambda x: x['attempts'])
+        peak_hour = peak_data['hour'].split(' ')[1] if ' ' in peak_data['hour'] else peak_data['hour']
+        peak_attempts = peak_data['attempts']
     
-    try:
-        # Conversion en emoji Unicode
-        # A = U+1F1E6, B = U+1F1E7, etc.
-        return ''.join(chr(127397 + ord(c)) for c in country_code.upper())
-    except:
-        return '🏴'
+    # Formate pour correspondre au format attendu par JS
+    response = {
+        # Stats globales
+        'total_attempts': stats.get('total_attempts', 0),
+        'unique_ips': stats.get('unique_ips', 0),
+        'last_update': stats.get('last_update', datetime.now().strftime('%H:%M:%S')),
+        
+        # Top IPs (format simplifié pour JS)
+        'top_ips': [
+            {
+                'ip': ip['ip'],
+                'attempts': ip['total_attempts'],
+                'country': ip.get('country_name', 'Unknown'),
+                'threat_level': ip.get('threat_level', 'Modéré')
+            }
+            for ip in top_ips_data
+        ],
+        
+        # Top pays
+        'top_countries': [
+            {
+                'country': c.get('country_name', 'Unknown'),
+                'country_code': c.get('country', 'XX'),
+                'ip_count': c.get('ip_count', 0),
+                'total_attempts': c.get('total_attempts', 0)
+            }
+            for c in top_countries_data
+        ],
+        
+        # Répartition menaces (pour graphique camembert)
+        'threat_distribution': {
+            'critical': stats.get('critical_count', 0),
+            'high': stats.get('high_count', 0),
+            'moderate': stats.get('moderate_count', 0)
+        },
+        
+        # Données pour calculs JS
+        'critical_count': stats.get('critical_count', 0),
+        'high_count': stats.get('high_count', 0),
+        'moderate_count': stats.get('moderate_count', 0),
+        'banned_count': stats.get('banned_count', 0),
+        
+        # Peak attack (pour widget "Pic d'attaque")
+        'peak_hour': peak_hour,
+        'peak_attempts': peak_attempts,
+        
+        # Tendance 24h (calcul simple pour l'instant)
+        'trend_24h': 0  # TODO: implémenter comparaison avec hier
+    }
+    
+    return jsonify(response)
 
 
-@api_bp.route('/')
-def index():
-    """Page principale du dashboard"""
-    return render_template('index.html')
+# ============================================
+# GÉOLOCALISATION (APPELÉ PAR JS)
+# ============================================
 
-
-@api_bp.route('/api/stats')
-def stats():
-    """
-    Endpoint : statistiques globales SSH
-    Retourne total tentatives, IPs uniques, top 10 IPs
-    """
-    data = get_ssh_stats()
-    return jsonify(data)
-
-
-@api_bp.route('/api/top-ips')
-def top_ips():
-    """
-    Endpoint : top 10 IPs suspectes
-    Retourne uniquement la liste des IPs
-    """
-    data = get_ssh_stats()
-    return jsonify(data.get('top_ips', []))
-
-
-@api_bp.route('/api/geolocate/<ip>')
+@api.route('/api/geolocate/<ip>', methods=['GET'])
 def geolocate_ip(ip):
     """
-    Endpoint : géolocalisation d'une IP
-    Utilise l'API gratuite ip-api.com (150 req/min)
-    
-    Retourne:
-        - country: Nom du pays
-        - country_code: Code ISO (FR, US, etc.)
-        - city: Ville
-        - flag: Emoji du drapeau
+    Endpoint géolocalisation appelé par updateTableWithGeo()
+    Format attendu par JS ligne 350 :
+    {
+        "success": true,
+        "country": "France",
+        "country_code": "FR",
+        "flag": "🇫🇷",
+        "city": "Paris"
+    }
     """
-    try:
-        # Validation basique de l'IP
-        if not ip or ip == 'localhost' or ip.startswith('127.'):
-            return jsonify({
-                'success': False,
-                'country': 'Local',
-                'country_code': 'XX',
-                'city': 'Localhost',
-                'flag': '🏠'
-            })
-        
-        # Appel API ip-api.com (gratuit, pas de clé)
-        response = requests.get(
-            f'http://ip-api.com/json/{ip}',
-            params={
-                'fields': 'status,country,countryCode,city,message'
-            },
-            timeout=3  # Timeout 3 secondes
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Succès
-            if data.get('status') == 'success':
-                country_code = data.get('countryCode', 'XX')
-                
-                return jsonify({
-                    'success': True,
-                    'country': data.get('country', 'Unknown'),
-                    'country_code': country_code,
-                    'city': data.get('city', 'Unknown'),
-                    'flag': get_flag_emoji(country_code)
-                })
-            
-            # Échec API (IP privée, invalide, etc.)
-            else:
-                error_msg = data.get('message', 'Unknown error')
-                print(f"Erreur API pour {ip}: {error_msg}")
-                
-                return jsonify({
-                    'success': False,
-                    'country': 'Unknown',
-                    'country_code': 'XX',
-                    'city': 'Unknown',
-                    'flag': '🏴',
-                    'error': error_msg
-                })
-        
-        # Erreur HTTP
-        else:
-            print(f"HTTP {response.status_code} pour {ip}")
-            return jsonify({
-                'success': False,
-                'country': 'Unknown',
-                'country_code': 'XX',
-                'city': 'Unknown',
-                'flag': '🏴'
-            })
+    # Récupère IP depuis BDD (déjà géolocalisée lors du parsing)
+    attack = get_attack_by_ip(ip)
     
-    except requests.Timeout:
-        print(f"Timeout géolocalisation pour {ip}")
-        return jsonify({
-            'success': False,
-            'country': 'Timeout',
-            'country_code': 'XX',
-            'city': 'Unknown',
-            'flag': '⏱️'
-        })
-    
-    except Exception as e:
-        print(f"Erreur géolocalisation {ip}: {str(e)}")
-        return jsonify({
-            'success': False,
-            'country': 'Error',
-            'country_code': 'XX',
-            'city': 'Unknown',
-            'flag': '❌',
-            'error': str(e)
-        })
-
-
-@api_bp.route('/api/generate-ban-script')
-def generate_ban_script():
-    """
-    Génère un script bash pour bannir les IPs critiques (≥50 tentatives)
-    Retourne le script avec les commandes iptables
-    """
-    try:
-        data = get_ssh_stats()
-        
-        if not data or not data.get('top_ips'):
-            return jsonify({
-                'success': False,
-                'error': 'Aucune donnée disponible'
-            }), 400
-        
-        # Filtre les IPs critiques (≥50 tentatives)
-        critical_ips = [
-            item['ip'] for item in data['top_ips'] 
-            if item.get('attempts', 0) >= 50
-        ]
-        
-        if not critical_ips:
-            return jsonify({
-                'success': False,
-                'error': 'Aucune IP critique à bannir'
-            }), 400
-        
-        # Génère le script bash
-        script_lines = [
-            "#!/bin/bash",
-            "# Script d'auto-bannissement généré par SSH Attack Dashboard",
-            f"# Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            f"# Nombre d'IPs: {len(critical_ips)}",
-            "",
-            "echo 'Bannissement des IPs critiques...'",
-            ""
-        ]
-        
-        for ip in critical_ips:
-            script_lines.append(f"# Bannir {ip}")
-            script_lines.append(f"iptables -A INPUT -s {ip} -j DROP")
-            script_lines.append(f"echo '✓ {ip} bannie'")
-            script_lines.append("")
-        
-        script_lines.extend([
-            "# Sauvegarde des règles iptables",
-            "iptables-save > /etc/iptables/rules.v4",
-            "",
-            "echo 'Bannissement terminé !'",
-            f"echo '{len(critical_ips)} IP(s) bloquée(s)'"
-        ])
-        
-        script_content = "\n".join(script_lines)
+    if attack and attack.get('country_name'):
+        # Flag emoji depuis code pays
+        flag = get_flag_emoji(attack.get('country', ''))
         
         return jsonify({
             'success': True,
-            'script': script_content,
-            'ips': critical_ips,
-            'count': len(critical_ips)
+            'country': attack['country_name'],
+            'country_code': attack.get('country', 'XX'),
+            'flag': flag,
+            'city': attack.get('city', 'Unknown'),
+            'isp': attack.get('isp', 'Unknown')
         })
-        
-    except Exception as e:
-        print(f"[ERROR] Génération script ban: {str(e)}")
+    else:
+        # Fallback si pas de géoloc en BDD
         return jsonify({
             'success': False,
-            'error': str(e)
-        }), 500
+            'country': 'Unknown',
+            'country_code': 'XX',
+            'flag': '🏴',
+            'city': 'Unknown',
+            'isp': 'Unknown'
+        })
 
+def get_flag_emoji(country_code):
+    """Convertit code pays en emoji drapeau"""
+    if not country_code or len(country_code) != 2:
+        return '🏴'
+    
+    # Convertit FR → 🇫🇷
+    # ASCII A-Z = 65-90, Regional Indicator Symbol = 127462-127487
+    return ''.join(chr(127462 + ord(c) - 65) for c in country_code.upper())
 
-@api_bp.route('/api/health')
-def health():
+# ============================================
+# AUTO-BAN (BONUS POUR TON JS)
+# ============================================
+
+@api.route('/api/generate-ban-script', methods=['GET'])
+def generate_ban_script():
     """
-    Endpoint : health check
-    Vérifie que l'API est opérationnelle
+    Génère script bash pour bannir IPs critiques.
+    Appelé par openBanModal() dans ton JS ligne 1420.
     """
+    critical_ips = get_critical_ips_for_ban()
+    
+    if not critical_ips or len(critical_ips) == 0:
+        return jsonify({
+            'success': False,
+            'error': 'Aucune IP critique détectée',
+            'count': 0
+        })
+    
+    # Génère script bash
+    script_lines = [
+        '#!/bin/bash',
+        '# SSH Attack Dashboard - Auto-ban Script',
+        f'# Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+        f'# IPs to ban: {len(critical_ips)}',
+        '',
+        'echo "🔥 Banning malicious IPs..."',
+        ''
+    ]
+    
+    for ip_data in critical_ips:
+        ip = ip_data['ip']
+        attempts = ip_data['total_attempts']
+        script_lines.append(f'# {ip} - {attempts} attempts')
+        script_lines.append(f'iptables -A INPUT -s {ip} -j DROP')
+        script_lines.append(f'echo "✅ Banned {ip}"')
+        script_lines.append('')
+    
+    script_lines.extend([
+        'echo "💾 Saving iptables rules..."',
+        'iptables-save > /etc/iptables/rules.v4',
+        f'echo "✅ Done! Banned {len(critical_ips)} IPs"'
+    ])
+    
+    script = '\n'.join(script_lines)
+    
     return jsonify({
-        'status': 'ok',
-        'service': 'SSH Attack Dashboard',
-        'version': '1.0.0'
+        'success': True,
+        'count': len(critical_ips),
+        'ips': [ip['ip'] for ip in critical_ips],
+        'script': script
+    })
+
+# ============================================
+# HISTORIQUE (BONUS)
+# ============================================
+
+@api.route('/api/history', methods=['GET'])
+def get_attack_history():
+    """Timeline 24h pour graphique Chart.js"""
+    hours = request.args.get('hours', default=24, type=int)
+    timeline = get_attacks_timeline(hours=hours)
+    
+    labels = [t['hour'] for t in timeline]
+    data = [t['attempts'] for t in timeline]
+    
+    return jsonify({
+        'success': True,
+        'labels': labels,
+        'data': data
+    })
+
+# ============================================
+# HEALTH CHECK
+# ============================================
+
+@api.route('/api/health', methods=['GET'])
+def health_check():
+    """Monitoring production"""
+    stats = get_dashboard_stats()
+    
+    return jsonify({
+        'status': 'healthy',
+        'database': {
+            'size': get_db_size(),
+            'unique_ips': stats.get('unique_ips', 0),
+            'total_attacks': stats.get('total_attempts', 0)
+        },
+        'timestamp': datetime.now().isoformat()
     })

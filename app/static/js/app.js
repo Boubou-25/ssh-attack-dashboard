@@ -142,6 +142,166 @@ function updateLastUpdate() {
 }
 
 // ============================================
+// STATISTIQUES AVANCÉES (4 fenêtres)
+// ============================================
+function updateAdvancedStats(data) {
+    console.log('🔄 Mise à jour stats avancées...', data);
+    
+    // 1. Score de sécurité
+    updateSecurityScore(data);
+    
+    // 2. Répartition (Chart.js camembert)
+    updateThreatDistribution(data);
+    
+    // 3. Pic d'attaque
+    updatePeakAttack(data);
+    
+    // 4. Tendance 24h
+    updateTrend(data);
+}
+
+function updateSecurityScore(data) {
+    const total = data.unique_ips || 0;
+    const critical = data.critical_count || 0;
+    
+    // Calcul score : 100 - (% d'IPs critiques)
+    let score = 100;
+    if (total > 0) {
+        score = Math.max(0, Math.round(100 - (critical / total * 100)));
+    }
+    
+    console.log('📊 Score sécurité:', score);
+    
+    // Update texte
+    const scoreEl = document.getElementById('security-score');
+    if (scoreEl) {
+        scoreEl.textContent = score;
+    }
+    
+    // Update label
+    const labelEl = document.getElementById('score-label');
+    if (labelEl) {
+        if (score >= 80) {
+            labelEl.textContent = '✓ Sécurité optimale';
+            labelEl.style.color = '#22c55e';
+        } else if (score >= 50) {
+            labelEl.textContent = '⚠ Sécurité moyenne';
+            labelEl.style.color = '#f59e0b';
+        } else {
+            labelEl.textContent = '✗ Sécurité critique';
+            labelEl.style.color = '#ef4444';
+        }
+    }
+    
+    // Update cercle SVG
+    const circleEl = document.getElementById('score-circle');
+    if (circleEl) {
+        const circumference = 408.4; // 2 * PI * 65
+        const offset = circumference - (score / 100) * circumference;
+        circleEl.style.strokeDashoffset = offset;
+        
+        // Couleur selon score
+        if (score >= 80) {
+            circleEl.style.stroke = '#22c55e';
+        } else if (score >= 50) {
+            circleEl.style.stroke = '#f59e0b';
+        } else {
+            circleEl.style.stroke = '#ef4444';
+        }
+    }
+}
+
+function updateThreatDistribution(data) {
+    const dist = data.threat_distribution || { critical: 0, high: 0, moderate: 0 };
+    
+    console.log('📊 Répartition:', dist);
+    
+    // Update badges cachés (pour compatibilité)
+    const criticalEl = document.getElementById('threat-critical');
+    const highEl = document.getElementById('threat-high');
+    const moderateEl = document.getElementById('threat-moderate');
+    
+    if (criticalEl) criticalEl.textContent = dist.critical;
+    if (highEl) highEl.textContent = dist.high;
+    if (moderateEl) moderateEl.textContent = dist.moderate;
+    
+    // Update Chart.js camembert
+    const canvas = document.getElementById('levelChart');
+    if (canvas && typeof Chart !== 'undefined') {
+        const ctx = canvas.getContext('2d');
+        
+        // Détruit ancien chart si existe
+        if (canvas.chart) {
+            canvas.chart.destroy();
+        }
+        
+        canvas.chart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Critique', 'Élevé', 'Modéré'],
+                datasets: [{
+                    data: [dist.critical, dist.high, dist.moderate],
+                    backgroundColor: ['#ef4444', '#f59e0b', '#3b82f6'],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            color: 'var(--text-primary)',
+                            font: { size: 12 }
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+function updatePeakAttack(data) {
+    const peakHour = data.peak_hour || '--h';
+    const peakAttempts = data.peak_attempts || 0;
+    
+    console.log('📊 Pic attaque:', peakHour, peakAttempts);
+    
+    const hourEl = document.getElementById('peak-hour');
+    const attemptsEl = document.getElementById('peak-attempts');
+    
+    if (hourEl) hourEl.textContent = peakHour;
+    if (attemptsEl) attemptsEl.textContent = `${peakAttempts} tentatives`;
+}
+
+function updateTrend(data) {
+    const trend = data.trend_24h || 0;
+    
+    console.log('📊 Tendance:', trend);
+    
+    const trendEl = document.getElementById('trend-value');
+    
+    if (trendEl) {
+        let icon = 'fa-minus';
+        let color = 'var(--text-primary)';
+        
+        if (trend > 0) {
+            icon = 'fa-arrow-up';
+            color = '#ef4444'; // Rouge = hausse attaques
+        } else if (trend < 0) {
+            icon = 'fa-arrow-down';
+            color = '#22c55e'; // Vert = baisse attaques
+        }
+        
+        trendEl.innerHTML = `<i class="fas ${icon}"></i> ${Math.abs(trend)}%`;
+        trendEl.style.color = color;
+    }
+}
+
+
+// ============================================
 // GRAPHIQUES CHART.JS
 // ============================================
 function initChart() {
@@ -174,7 +334,11 @@ function initChart() {
             scales: {
                 y: {
                     beginAtZero: true,
-                    ticks: { stepSize: 10, color: textColor },
+                    ticks: { 
+                        stepSize: null,      // ← MODIFIÉ : Auto au lieu de 10 fixe
+                        precision: 0,        // ← AJOUTÉ : Pas de décimales
+                        color: textColor 
+                    },
                     grid: { color: gridColor }
                 },
                 x: {
@@ -199,6 +363,7 @@ function initChart() {
         }
     });
 }
+
 
 function updateChart(topIps) {
     if (!attackChart) return;
